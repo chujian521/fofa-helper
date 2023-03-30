@@ -170,15 +170,15 @@ class Fofa:
                 # urllist = tree.xpath('//span[@class="hsxa-host"]/a/@href')
                 timelist = self.getTimeList(rep.text)
                 logger.info("[*] 已爬取条数 [{}]: ".format(len(self.host_set))+str(self.levelData.formatData))
-
-                for url in self.levelData.formatData:
-                    self.host_set.add(url)
-                    if self.check_url:
-                        if not check_url_valid(url):
-                            logger.warning("[-] " + url + " 无法访问！")
-                            continue
-                    with open(self.filename, 'a+', encoding="utf-8") as f:
-                        f.write(str(url) + "\n")
+                with open(self.filename, 'a+', encoding="utf-8") as f:
+                    for url in self.levelData.formatData:
+                        if url not in self.host_set:
+                            self.host_set.add(url)
+                            if self.check_url:
+                                if not check_url_valid(url):
+                                    logger.warning("[-] " + url + " 无法访问！")
+                                    continue
+                            f.write(str(url) + "\n")
                 for temptime in timelist:
                     self.timestamp_set.add(temptime)
                 time.sleep(self.timeSleep)
@@ -195,7 +195,10 @@ class Fofa:
 
 
     def fofa_common_spider(self, search_key, searchbs64):
-        while len(self.host_set) < self.endcount and self.oldLength !=len(self.host_set):
+        retry = config.MAX_MATCH_RETRY_NUM
+        while len(self.host_set) < self.endcount and retry > 0:
+            if self.oldLength ==len(self.host_set):
+                retry -= 1
             self.oldLength=len(self.host_set)
             self.timestamp_set.clear()
             self.fofa_spider_page(searchbs64)
