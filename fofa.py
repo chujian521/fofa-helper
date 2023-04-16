@@ -5,6 +5,7 @@
 # @File    : fofa.py
 
 import base64
+import json
 import os
 import time
 import config
@@ -15,7 +16,6 @@ from datetime import datetime, timedelta
 from urllib.parse import quote_plus
 from utils import fofa_useragent
 from utils.levelData import LevelData
-from utils.outputData import OutputData
 from lxml import etree
 from utils.tools import check_url_valid, searchkey_to_filename
 from utils.logger import get_logger
@@ -52,11 +52,10 @@ class Fofa:
                                     
         '''.format(config.VERSION_NUM))
 
-    def headers(self,cookie):
+    def headers(self):
         headers_use = {
             'User-Agent': fofa_useragent.getFakeUserAgent(),
             'Accept': 'application/json, text/plain, */*',
-            "cookie": cookie.encode("utf-8").decode("latin1")
         }
         return headers_use
 
@@ -69,7 +68,7 @@ class Fofa:
             [*] 是否FUZZ: {}
             [*] 输出格式为: {}
             [*] 是否检查url: {}
-            [*] 存储文件名: {}'''.format(self.level,self.timeSleep,self.searchKey,self.endcount,self.fuzz,self.output,self.check_url,self.filename)
+            [*] 存储文件名: {}'''.format(self.level,self.timeSleep,self.searchKey,self.endcount,self.fuzz,"txt",self.check_url,self.filename)
                     )
         return
 
@@ -86,11 +85,12 @@ class Fofa:
         parser.add_argument('--keyword', '-k', help='fofa搜索关键字', required=True)
         parser.add_argument('--endcount', '-e', help='爬取结束数量')
         parser.add_argument('--level', '-l', help='爬取等级: 1-3 ,数字越大内容越详细,默认为 1')
-        parser.add_argument('--output', '-o', help='输出格式:txt、json,默认为txt')
         parser.add_argument('--fuzz', '-f', help='关键字fuzz参数,增加内容获取粒度',action='store_true')
         parser.add_argument('--savepath', '-sp', help='保存结果的路径，默认为当前文件夹下的result目录',default="result")
         parser.add_argument('--savename', '-sn', help='保存结果的文件名称',default="")
         parser.add_argument('--checkurl', '-ck', help='是否检查url有效性，默认为False', default=False)
+        parser.add_argument('--apikey', '-ak', help='使用APIKEY获取', default="")
+        parser.add_argument('--email', '-em', help='使用APIKEY时对应的邮箱', default="")
         args = parser.parse_args()
         self.timeSleep= int(args.timesleep)
         self.timeout = int(args.timeout)
@@ -103,18 +103,18 @@ class Fofa:
         self.levelData=LevelData(self.level)
         self.fuzz=args.fuzz
         self.check_url = args.checkurl
-        self.output = args.output if args.output else "txt"
         self.savepath = args.savepath
+        self.email = args.email
+        self.apikey = args.apikey
         if not os.path.exists(self.savepath):
             os.makedirs(self.savepath)
         if not self.savepath.endswith(os.path.sep):
             self.savepath += os.path.sep
         self.filename = args.savename
         if not self.filename:
-            self.filename = "{}_{}.{}".format(self.savepath+searchkey_to_filename(self.searchKey), time.strftime('%Y-%m-%d-%H-%M-%S',time.localtime(time.time())), self.output)
+            self.filename = "{}_{}.{}".format(self.savepath+searchkey_to_filename(self.searchKey), time.strftime('%Y-%m-%d-%H-%M-%S',time.localtime(time.time())), "txt")
         else:
-            self.filename = self.savepath + self.filename + "." + self.output
-        self.outputData = OutputData(self.filename, pattern=self.output)
+            self.filename = self.savepath + self.filename + ".txt"
         self.logoutInitMsg()
 
     def get_count_num(self, search_key):
@@ -163,6 +163,7 @@ class Fofa:
             try:
                 request_url = 'https://fofa.info/result?qbase64=' + searchbs64 + "&full=false&page_size=10"
                 # print(f'request_url:{request_url}')
+                self.headers_use = self.headers()
                 rep = requests.get(request_url, headers=self.headers_use, timeout=self.timeout)
                 self.levelData.startSpider(rep)
 
@@ -172,13 +173,22 @@ class Fofa:
                 logger.info("[*] 已爬取条数 [{}]: ".format(len(self.host_set))+str(self.levelData.formatData))
                 with open(self.filename, 'a+', encoding="utf-8") as f:
                     for url in self.levelData.formatData:
-                        if url not in self.host_set:
-                            self.host_set.add(url)
-                            if self.check_url:
-                                if not check_url_valid(url):
-                                    logger.warning("[-] " + url + " 无法访问！")
-                                    continue
-                            f.write(str(url) + "\n")
+                        if self.level == "1":
+                            if url not in self.host_set:
+                                self.host_set.add(url)
+                                if self.check_url:
+                                    if not check_url_valid(url):
+                                        logger.warning("[-] " + url + " 无法访问！")
+                                        continue
+                                f.write(str(url) + "\n")
+                        else:
+                            if url['url'] not in self.host_set:
+                                self.host_set.add(url['url'])
+                                if self.check_url:
+                                    if not check_url_valid(url['url']):
+                                        logger.warning("[-] " + url['url'] + " 无法访问！")
+                                        continue
+                                f.write(json.dumps(url) + "\n")
                 for temptime in timelist:
                     self.timestamp_set.add(temptime)
                 time.sleep(self.timeSleep)
@@ -274,7 +284,28 @@ class Fofa:
 
         return search_key_modify
 
-    def run(self):
+    def fofa_api_request(self):
+        """利用APIKEY批量抓取信息
+        """
+        if not self.email or not self.apikey:
+            logger.error("必须同时指定APIKEY以及邮箱！")
+            return
+        qbase64 = base64.b64encode(self.searchKey.encode()).decode()
+        api = 'https://fofa.info/api/v1/search/all?email={}&key={}&qbase64={}&size={}'.format(self.email, self.apikey, qbase64, self.endcount)
+        logger.info("[*] 正在请求页面查询{}".format(self.searchKey))
+        self.headers_use = self.headers()
+        response = requests.get(api, headers=self.headers_use)
+        try:
+            data_result = response.json()["results"]
+            count = len(data_result)
+            logger.info('[*] 抓取结束，共抓取数据 ' + str(count) + ' 条\n')
+            with open(self.filename, 'a+', encoding="utf-8") as f:
+                f.write(json.dumps(data_result, indent=2))
+        except Exception as e:
+            logger.warning(response.text)
+            logger.warning(e)
+
+    def run_free(self):
         searchbs64 = self.get_count_num(self.searchKey)
         if not self.fuzz:
             self.fofa_common_spider(self.searchKey, searchbs64)
@@ -285,7 +316,10 @@ class Fofa:
     def main(self):
         self.init()
         logger.info('[*] 开始运行')
-        self.run()
+        if self.apikey:
+            self.fofa_api_request()
+        else:
+            self.run_free()
 
 if __name__ == '__main__':
     fofa = Fofa()

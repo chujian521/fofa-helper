@@ -75,6 +75,10 @@ optional arguments:
                         保存结果的文件名称
   --checkurl CHECKURL, -ck CHECKURL
                         是否检查url有效性，默认为False
+  --apikey APIKEY, -ak APIKEY
+                        使用APIKEY获取
+  --email EMAIL, -em EMAIL
+                        使用APIKEY时对应的邮箱
 ```
 
 爬取的结果默认会存储到`result/查询关键字_时间戳.txt`文件中
